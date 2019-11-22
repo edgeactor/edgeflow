@@ -3,7 +3,7 @@
   
   <groupId>com.cloudera.labs.envelope</groupId>
   <artifactId>envelope-parent</artifactId>
-  <version>0.7.1</version>
+  <version>0.7.1-edge</version>
   <packaging>pom</packaging>
   
   <inceptionYear>2015</inceptionYear>
@@ -36,7 +36,6 @@
   <properties>
     <!-- Dependencies -->
     <scala.version>2.11</scala.version>
-    <spark.version>2.1.0</spark.version>
     <guava.version>16.0.1</guava.version>
     <typesafe.config.version>1.2.1</typesafe.config.version>
     <slf4j.version>1.7.5</slf4j.version>
@@ -148,6 +147,27 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <profiles>
+    <profile>
+      <id>spark-2.4</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <properties>
+        <spark.version>2.4.4</spark.version>
+      </properties>
+    </profile>
+    <profile>
+      <id>spark-2.3</id>
+      <activation>
+        <activeByDefault>false</activeByDefault>
+      </activation>
+      <properties>
+        <spark.version>2.3.2</spark.version>
+      </properties>
+    </profile>
+  </profiles>
 
   <build>
     <plugins>
