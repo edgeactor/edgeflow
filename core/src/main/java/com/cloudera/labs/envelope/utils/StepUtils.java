@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2019, Cloudera, Inc. All Rights Reserved.
+ * Copyright (c) 2015-2020, Cloudera, Inc. All Rights Reserved.
  *
  * Cloudera, Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"). You may not use this file except in
@@ -25,15 +25,7 @@ import com.cloudera.labs.envelope.input.BatchInput;
 import com.cloudera.labs.envelope.input.Input;
 import com.cloudera.labs.envelope.input.StreamInput;
 import com.cloudera.labs.envelope.repetition.Repetitions;
-import com.cloudera.labs.envelope.run.BatchStep;
-import com.cloudera.labs.envelope.run.DataStep;
-import com.cloudera.labs.envelope.run.DecisionStep;
-import com.cloudera.labs.envelope.run.LoopStep;
-import com.cloudera.labs.envelope.run.Runner;
-import com.cloudera.labs.envelope.run.Step;
-import com.cloudera.labs.envelope.run.StepState;
-import com.cloudera.labs.envelope.run.StreamingStep;
-import com.cloudera.labs.envelope.run.TaskStep;
+import com.cloudera.labs.envelope.run.*;
 import com.google.common.base.Optional;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -43,6 +35,7 @@ import org.apache.spark.sql.Row;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -358,7 +351,7 @@ public class StepUtils {
       return mergedSteps;
     }
     else {
-      return baseSteps;
+      return Sets.newHashSet(baseSteps);
     }
   }
 
@@ -382,6 +375,40 @@ public class StepUtils {
     }
 
     return matchingSteps;
+  }
+
+    /**
+     * This method will sort the steps to put all the dependencies before dependent step
+     * in order to get the maximum speed of parallelism procedure.
+     * @param barrycg
+     * @return
+     */
+  public static LinkedHashSet<Step>  sortStepsDependencies(LinkedHashSet<Step> steps){
+
+    LinkedHashSet<Step> sortedSteps = Sets.newLinkedHashSet();
+    // Add all the dependencies and the dependent step itself.
+    for(final Step step: steps){
+      sortedSteps.addAll(getRecursiveStepDependencies(step, steps));
+      sortedSteps.add(step);
+    }
+    return sortedSteps;
+  }
+
+
+  private static LinkedHashSet<Step> getRecursiveStepDependencies(Step step, LinkedHashSet<Step> steps){
+
+    LinkedHashSet<Step> resSet = Sets.newLinkedHashSet();
+    for( final String dependent: step.getDependencyNames() ){
+       for( final Step sp: steps){
+         if( sp.getName().equals(dependent)){
+           resSet.add(sp);
+           if( sp.getDependencyNames().size() > 0 ){
+             resSet.addAll(getRecursiveStepDependencies(sp, steps));
+           }
+         }
+       }
+    }
+    return resSet;
   }
 
 }

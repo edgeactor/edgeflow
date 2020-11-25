@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2019, Cloudera, Inc. All Rights Reserved.
+ * Copyright (c) 2015-2020, Cloudera, Inc. All Rights Reserved.
  *
  * Cloudera, Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"). You may not use this file except in
@@ -58,6 +58,7 @@ import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,7 +142,7 @@ public class Runner {
   }
 
   private ExecutionMode getExecutionMode(Set<Step> steps) {
-    ExecutionMode mode = StepUtils.hasStreamingStep(steps) ? Contexts.ExecutionMode.STREAMING : Contexts.ExecutionMode.BATCH;
+    ExecutionMode mode = StepUtils.hasStreamingStep(steps) ? ExecutionMode.STREAMING : ExecutionMode.BATCH;
     notifyExecutionMode(mode);
 
     return mode;
@@ -212,13 +213,16 @@ public class Runner {
     Set<Step> refactoredSteps = null;
     Map<String, StepState> previousStepStates = null;
 
+    //The linkedSteps is a dependency-sorted LinkedHashSet.
+    LinkedHashSet<Step> linkedSteps = Sets.newLinkedHashSet(steps);
+
     // The essential logic is to loop through all of the steps until they have all been submitted.
     // Steps will not be submitted until all of their dependency steps have been submitted first.
-    while (!StepUtils.allStepsSubmitted(steps)) {
+    while (!StepUtils.allStepsSubmitted(linkedSteps)) {
       LOG.debug("Not all steps have been submitted");
 
       Set<Step> newSteps = Sets.newHashSet();
-      for (final Step step : steps) {
+      for (final Step step : linkedSteps) {
         LOG.debug("Looking into step: " + step.getName());
 
         if (step instanceof BatchStep) {
@@ -231,7 +235,7 @@ public class Runner {
             // Get the dependency steps that exist so far. Steps can be created
             // during runtime by refactor steps, so this set may be smaller than
             // the full list of dependencies the step needs to wait for.
-            final Set<Step> dependencies = StepUtils.getDependencies(step, steps);
+            final Set<Step> dependencies = StepUtils.getDependencies(step, linkedSteps);
 
             if (dependencies.size() == step.getDependencyNames().size() &&
                 StepUtils.allStepsFinished(dependencies)) {
@@ -259,12 +263,12 @@ public class Runner {
           if (refactorStep.getState() == StepState.WAITING) {
             LOG.debug("Step has not been submitted");
 
-            final Set<Step> dependencies = StepUtils.getDependencies(step, steps);
+            final Set<Step> dependencies = StepUtils.getDependencies(step, linkedSteps);
   
             if (StepUtils.allStepsFinished(dependencies)) {
               LOG.debug("Step dependencies have finished, refactoring steps");
               refactorStep.setState(StepState.SUBMITTED);
-              refactoredSteps = refactorStep.refactor(steps);
+              refactoredSteps = refactorStep.refactor(linkedSteps);
               LOG.debug("Steps refactored");
               break;
             }
@@ -278,7 +282,7 @@ public class Runner {
           if (taskStep.getState() == StepState.WAITING) {
             LOG.debug("Step has not been submitted");
 
-            final Set<Step> dependencies = StepUtils.getDependencies(step, steps);
+            final Set<Step> dependencies = StepUtils.getDependencies(step, linkedSteps);
             
             if (StepUtils.allStepsFinished(dependencies)) {
               LOG.debug("Step dependencies have finished, running task");
@@ -299,22 +303,24 @@ public class Runner {
       }
 
       // Add all steps created while looping through previous set of steps.
-      steps.addAll(newSteps);
+      linkedSteps.addAll(newSteps);
 
       if (refactoredSteps != null) {
-        steps = refactoredSteps;
+        linkedSteps = Sets.newLinkedHashSet(refactoredSteps);
         refactoredSteps = null;
       }
 
+      linkedSteps = StepUtils.sortStepsDependencies(linkedSteps);
+
       // Make sure the loop doesn't get stuck from an incorrect config
-      Map<String, StepState> stepStates = StepUtils.getStepStates(steps);
-      Set<Step> waitingSteps = StepUtils.getStepsMatchingState(steps, StepState.WAITING);
-      Set<Step> submittedSteps = StepUtils.getStepsMatchingState(steps, StepState.SUBMITTED);
+      Map<String, StepState> stepStates = StepUtils.getStepStates(linkedSteps);
+      Set<Step> waitingSteps = StepUtils.getStepsMatchingState(linkedSteps, StepState.WAITING);
+      Set<Step> submittedSteps = StepUtils.getStepsMatchingState(linkedSteps, StepState.SUBMITTED);
       if (stepStates.equals(previousStepStates) &&
           waitingSteps.size() > 0 &&
           submittedSteps.size() == 0) {
         throw new RuntimeException("Envelope pipeline stuck due to steps waiting for dependencies " +
-            "that do not exist. Steps: " + steps);
+            "that do not exist. Steps: " + linkedSteps);
       }
       previousStepStates = stepStates;
 
@@ -325,7 +331,7 @@ public class Runner {
     // Wait for the submitted steps that haven't yet finished
     awaitAllOffMainThreadsFinished(offMainThreadSteps);
 
-    LOG.debug("Finished batch for steps: {}", StepUtils.stepNamesAsString(steps));
+    LOG.debug("Finished batch for steps: {}", StepUtils.stepNamesAsString(linkedSteps));
   }
 
   private void initializeThreadPool(Config config) {
